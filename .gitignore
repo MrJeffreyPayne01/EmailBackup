@@ -1,0 +1,13 @@
+# Archive logs contain personal mail metadata (subjects, senders) - never commit.
+ArchiveLog-*.csv
+*.csv
+
+# Mail data
+*.pst
+*.ost
+*.msg
+
+# Windows / editor noise
+Thumbs.db
+desktop.ini
+.vscode/
