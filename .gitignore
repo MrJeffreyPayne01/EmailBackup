@@ -2,6 +2,9 @@
 ArchiveLog-*.csv
 *.csv
 
+# Transcripts from dry runs also capture subjects.
+*.log
+
 # Mail data
 *.pst
 *.ost

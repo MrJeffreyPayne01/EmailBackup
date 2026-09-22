@@ -32,7 +32,8 @@
     Also process subfolders of the source, recreating the folder tree under the target.
 
 .PARAMETER MaxItems
-    Stop after moving this many items. Useful for a cautious first run.
+    Stop after considering this many items, oldest first. Bounds the scan itself, so it
+    also limits a -WhatIf run. Useful for a cautious first run.
 
 .PARAMETER LogPath
     CSV file recording every moved item. Defaults to a timestamped file beside this script.
@@ -73,7 +74,6 @@ $ErrorActionPreference = 'Stop'
 $olFolderInbox  = 6
 $olStoreUnicode = 3
 $olMailItem     = 43   # OlObjectClass.olMail
-$olFolderMail   = 0    # OlDefaultFolders / folder type for IPF.Note
 
 function Assert-ClassicOutlook {
     $exe = Get-ChildItem -Path 'C:\Program Files\Microsoft Office', 'C:\Program Files (x86)\Microsoft Office' `
@@ -157,7 +157,8 @@ function New-ChildFolderIfMissing {
     $existing = Get-ChildFolder -Parent $Parent -Name $Name
     if ($existing) { return $existing }
     Write-Verbose "Creating folder '$Name' under '$($Parent.Name)'."
-    $Parent.Folders.Add($Name, $olFolderMail)
+    # No Type argument: OlFolderType has no "mail" member, so the folder inherits IPF.Note from its parent.
+    $Parent.Folders.Add($Name)
 }
 
 function Resolve-SourceFolder {
@@ -214,20 +215,22 @@ function Get-ArchiveCandidate {
     #>
     param(
         [Parameter(Mandatory)] $Folder,
-        [Parameter(Mandatory)][int] $Year
+        [Parameter(Mandatory)][int] $Year,
+        [int] $Limit = [int]::MaxValue
     )
 
     $cutoff = '{0:0000}-01-01 00:00' -f $Year
     $filter = '@SQL="urn:schemas:httpmail:datereceived" < ''{0}''' -f $cutoff
 
     $items = $Folder.Items
-    $items.Sort('[ReceivedTime]', $true)
+    $items.Sort('[ReceivedTime]', $false)   # oldest first, so a capped run takes the oldest mail
     $restricted = $items.Restrict($filter)
 
     $storeId = $Folder.StoreID
     $results = [System.Collections.Generic.List[object]]::new()
 
     for ($i = 1; $i -le $restricted.Count; $i++) {
+        if ($results.Count -ge $Limit) { break }
         $item = $restricted.Item($i)
         if ($item.Class -ne $olMailItem) { continue }   # skip meeting responses, reports, etc.
         $results.Add([pscustomobject]@{
@@ -248,6 +251,7 @@ function Invoke-FolderArchive {
         [Parameter(Mandatory)] $SourceFolder,
         [Parameter(Mandatory)] $TargetFolder,
         [Parameter(Mandatory)][int] $Year,
+        [Parameter(Mandatory)][ref] $Processed,
         [Parameter(Mandatory)][ref] $MovedCount,
         [Parameter(Mandatory)][ref] $Log
     )
@@ -257,16 +261,20 @@ function Invoke-FolderArchive {
         return
     }
 
+    $remaining = $MaxItems - $Processed.Value
+    if ($remaining -le 0) { return }
+
     Write-Host "Scanning $($SourceFolder.FolderPath) ..." -ForegroundColor Cyan
-    $candidates = Get-ArchiveCandidate -Folder $SourceFolder -Year $Year
-    Write-Host "  $($candidates.Count) item(s) received before $Year." -ForegroundColor Cyan
+    $candidates = Get-ArchiveCandidate -Folder $SourceFolder -Year $Year -Limit $remaining
+    Write-Host "  $($candidates.Count) item(s) selected (received before $Year)." -ForegroundColor Cyan
 
     $index = 0
     foreach ($candidate in $candidates) {
-        if ($MovedCount.Value -ge $MaxItems) {
+        if ($Processed.Value -ge $MaxItems) {
             Write-Warning "Reached -MaxItems limit of $MaxItems. Stopping."
             return
         }
+        $Processed.Value++
         $index++
 
         $label = '{0:yyyy-MM-dd}  {1}' -f $candidate.ReceivedTime, $candidate.Subject
@@ -296,22 +304,24 @@ function Invoke-RecursiveArchive {
         [Parameter(Mandatory)] $SourceFolder,
         [Parameter(Mandatory)] $TargetFolder,
         [Parameter(Mandatory)][int] $Year,
+        [Parameter(Mandatory)][ref] $Processed,
         [Parameter(Mandatory)][ref] $MovedCount,
         [Parameter(Mandatory)][ref] $Log
     )
 
     Invoke-FolderArchive -Namespace $Namespace -SourceFolder $SourceFolder -TargetFolder $TargetFolder `
-        -Year $Year -MovedCount $MovedCount -Log $Log
+        -Year $Year -Processed $Processed -MovedCount $MovedCount -Log $Log
 
     if (-not $IncludeSubfolders) { return }
 
     for ($i = 1; $i -le $SourceFolder.Folders.Count; $i++) {
+        if ($Processed.Value -ge $MaxItems) { return }
         $childSource = $SourceFolder.Folders.Item($i)
         if ($childSource.EntryID -eq $TargetFolder.EntryID) { continue }
 
         $childTarget = New-ChildFolderIfMissing -Parent $TargetFolder -Name $childSource.Name
         Invoke-RecursiveArchive -Namespace $Namespace -SourceFolder $childSource -TargetFolder $childTarget `
-            -Year $Year -MovedCount $MovedCount -Log $Log
+            -Year $Year -Processed $Processed -MovedCount $MovedCount -Log $Log
     }
 }
 
@@ -343,10 +353,11 @@ Write-Host "Subfolders  : $([bool]$IncludeSubfolders)"
 Write-Host ''
 
 $moved = 0
+$processed = 0
 $log = [System.Collections.Generic.List[object]]::new()
 
 Invoke-RecursiveArchive -Namespace $ns -SourceFolder $source -TargetFolder $target `
-    -Year $BeforeYear -MovedCount ([ref]$moved) -Log ([ref]$log)
+    -Year $BeforeYear -Processed ([ref]$processed) -MovedCount ([ref]$moved) -Log ([ref]$log)
 
 Write-Host ''
 Write-Host "Moved $moved item(s)." -ForegroundColor Green
