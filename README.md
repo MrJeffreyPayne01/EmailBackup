@@ -239,6 +239,58 @@ Add `-MaxItems`. It bounds the scan itself, not just the moves, so the script st
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
+### "The process cannot access the file ... because it is being used by another process"
+
+Outlook holds the PST files open. See [Unlocking the PSTs for backup](#unlocking-the-psts-for-backup).
+
+---
+
+## Unlocking the PSTs for backup
+
+You cannot copy a PST while Outlook has it open. Two separate things cause the lock, and releasing only the first is not enough:
+
+1. **The store is mounted in the profile.** `Namespace.RemoveStore($rootFolder)` detaches it. This does **not** delete the file, and the archive script re-mounts it automatically on its next run.
+2. **Outlook keeps the file handle until the process exits.** Dismounting alone leaves the file locked. Outlook may also hold handles on PSTs that are not currently mounted, if it opened them earlier in the session - so expect *every* PST in the directory to be locked, not just the one you were archiving to.
+
+A further trap: Outlook will ignore both `CloseMainWindow()` and its COM `Quit()` method while **any** process still holds a COM reference to it. An RCW keeps the server process alive. If you have PowerShell sessions with `$outlook` or `$namespace` variables still in scope, close those sessions first.
+
+### Procedure
+
+```powershell
+# 1. Dismount any archive stores from the profile (does not delete anything)
+$ns = (New-Object -ComObject Outlook.Application).GetNamespace('MAPI')
+for ($i = $ns.Folders.Count; $i -ge 1; $i--) {
+    $f = $ns.Folders.Item($i)
+    $p = $null; try { $p = $f.Store.FilePath } catch { }
+    if ($p -and $p -like 'E:\PSTArchiveFiles\*') { $ns.RemoveStore($f) }
+}
+
+# 2. Close every PowerShell session still holding Outlook COM references,
+#    then make sure Outlook has actually exited
+Get-Process OUTLOOK -ErrorAction SilentlyContinue | Stop-Process -Force
+(Get-Process OUTLOOK -ErrorAction SilentlyContinue | Measure-Object).Count   # must be 0
+
+# 3. Verify every PST is free before copying
+Get-ChildItem 'E:\PSTArchiveFiles' -Filter *.pst | ForEach-Object {
+    try {
+        $s = [IO.File]::Open($_.FullName, 'Open', 'ReadWrite', 'None'); $s.Close()
+        '  FREE   {0} ({1:N1} MB)' -f $_.Name, ($_.Length / 1MB)
+    } catch {
+        '  LOCKED {0}' -f $_.Name
+    }
+}
+```
+
+Step 3 is the part worth keeping: an exclusive `[IO.File]::Open` with `None` sharing is the only reliable proof the file is copyable. A plain `Test-Path` tells you nothing about locks.
+
+Force-terminating Outlook is safe when the instance was started headlessly by the script. If you have Outlook open interactively with unsent drafts, close it normally instead.
+
+### While copying
+
+Let the copy finish completely before reopening Outlook. Relaunching it mid-copy re-acquires the handles and the copy fails partway through. Reliable sequence every time:
+
+> close Outlook fully -> verify the process count is 0 -> copy -> reopen
+
 ---
 
 ## Cautions
@@ -252,6 +304,8 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 **PST size limits.** Unicode PSTs default to a 50 GB ceiling. Splitting by year keeps each file well clear of it.
 
 **Let Outlook finish syncing** before archiving, so the restriction sees the true state of the mailbox.
+
+**Back up the PSTs regularly.** They are the only copy of archived mail once IMAP sync removes it from the server. See [Unlocking the PSTs for backup](#unlocking-the-psts-for-backup) for how to release the file locks first.
 
 ---
 
