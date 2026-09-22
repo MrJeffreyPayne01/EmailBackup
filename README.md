@@ -233,6 +233,25 @@ You are almost certainly pointing at the wrong store. See [Know your store layou
 
 Add `-MaxItems`. It bounds the scan itself, not just the moves, so the script stops reading COM properties once it has enough candidates.
 
+### Outlook "won't load" after running a script
+
+The scripts start Outlook with `New-Object -ComObject Outlook.Application`, which creates a process with **no main window**. Clicking the Outlook shortcut afterwards finds that running instance and hands off to it, so nothing appears. Outlook looks broken when it is in fact already running, invisibly.
+
+The tell is a running process with an empty window title:
+
+```powershell
+Get-Process OUTLOOK | Select-Object Id, MainWindowTitle
+```
+
+Fix it by killing the windowless instance and launching the executable directly:
+
+```powershell
+Get-Process OUTLOOK -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Process 'C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE'
+```
+
+**Avoid it entirely by opening Outlook before running the scripts.** They attach to an already-running instance rather than creating a headless one, so the window stays visible throughout.
+
 ### Execution policy blocks the script
 
 ```powershell
@@ -290,6 +309,36 @@ Force-terminating Outlook is safe when the instance was started headlessly by th
 Let the copy finish completely before reopening Outlook. Relaunching it mid-copy re-acquires the handles and the copy fails partway through. Reliable sequence every time:
 
 > close Outlook fully -> verify the process count is 0 -> copy -> reopen
+
+---
+
+## Keeping the classic client
+
+This workflow depends on classic Outlook. Two `HKCU` values pin it and suppress the new-Outlook prompts:
+
+```powershell
+$pref = 'HKCU:\SOFTWARE\Microsoft\Office\16.0\Outlook\Preferences'
+$gen  = 'HKCU:\SOFTWARE\Microsoft\Office\16.0\Outlook\Options\General'
+
+New-ItemProperty -Path $pref -Name 'UseNewOutlook'        -Value 0 -PropertyType DWord -Force
+New-ItemProperty -Path $gen  -Name 'HideNewOutlookToggle' -Value 1 -PropertyType DWord -Force
+```
+
+| Value | Effect |
+| --- | --- |
+| `UseNewOutlook = 0` | Pins the classic client |
+| `HideNewOutlookToggle = 1` | Removes the "Try the new Outlook" ribbon toggle |
+
+Current-user scope only, so no elevation is needed. Takes effect on the next Outlook restart.
+
+To revert, delete the values (they do not exist by default, so removing them restores the original state):
+
+```powershell
+Remove-ItemProperty $pref -Name UseNewOutlook
+Remove-ItemProperty $gen  -Name HideNewOutlookToggle
+```
+
+These are the documented settings, but they are not a permanent guarantee - Microsoft has been progressively tightening the classic-to-new transition, and a future Microsoft 365 update can reintroduce prompts or override the preference. Re-run `Test-OutlookAutomation.ps1` after any major Office update to confirm COM automation still works.
 
 ---
 
