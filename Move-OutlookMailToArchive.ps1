@@ -265,7 +265,8 @@ function Invoke-FolderArchive {
     if ($remaining -le 0) { return }
 
     Write-Host "Scanning $($SourceFolder.FolderPath) ..." -ForegroundColor Cyan
-    $candidates = Get-ArchiveCandidate -Folder $SourceFolder -Year $Year -Limit $remaining
+    # @() guards the unroll: a returned List of 0 or 1 items would otherwise arrive as $null or a scalar.
+    $candidates = @(Get-ArchiveCandidate -Folder $SourceFolder -Year $Year -Limit $remaining)
     Write-Host "  $($candidates.Count) item(s) selected (received before $Year)." -ForegroundColor Cyan
 
     $index = 0
