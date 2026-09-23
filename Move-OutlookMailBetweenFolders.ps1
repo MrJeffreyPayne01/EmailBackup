@@ -144,7 +144,7 @@ while ($processed -lt $MaxItems -and -not $aborted) {
     $remaining = [Math]::Min($BatchSize, $MaxItems - $processed)
     $batch = [System.Collections.Generic.List[object]]::new()
 
-    for ($i = $scope.Count; $i -ge 1; $i--) {
+    for ($i = 1; $i -le $scope.Count; $i++) {
         if ($batch.Count -ge $remaining) { break }
         try { $item = $scope.Item($i) } catch { continue }
         if ($item.Class -ne $olMailItem) { continue }
@@ -162,6 +162,7 @@ while ($processed -lt $MaxItems -and -not $aborted) {
         break
     }
 
+    Write-Information "Batch of $($batch.Count): collected, moving..." -InformationAction Continue
     Write-Host "Batch: $($batch.Count) item(s)..." -ForegroundColor Cyan
 
     foreach ($entry in $batch) {
@@ -193,6 +194,8 @@ while ($processed -lt $MaxItems -and -not $aborted) {
     }
 
     if ($WhatIfPreference) { break }   # nothing actually moves, so the source never shrinks
+
+    Write-Information "Progress: $moved moved so far." -InformationAction Continue
 }
 
 Write-Host ''
