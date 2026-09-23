@@ -8,6 +8,7 @@ These scripts drive the **classic** Outlook desktop client over COM to move mess
 | --- | --- |
 | [`Test-OutlookAutomation.ps1`](Test-OutlookAutomation.ps1) | Read-only pre-flight check. **Run this first.** |
 | [`Move-OutlookMailToArchive.ps1`](Move-OutlookMailToArchive.ps1) | Does the archiving. One source folder, one target PST. |
+| [`Move-OutlookMailBetweenFolders.ps1`](Move-OutlookMailBetweenFolders.ps1) | Moves mail between Outlook folders, with optional date filtering and batches. |
 | [`Invoke-YearlyArchive.ps1`](Invoke-YearlyArchive.ps1) | Runs every year pass in the correct order. |
 
 ---
@@ -23,6 +24,12 @@ These scripts drive the **classic** Outlook desktop client over COM to move mess
 
 # 3. Same run for real
 .\Move-OutlookMailToArchive.ps1 -SourceFolderPath 'me@gmail.com\Inbox' -MaxItems 50 -Confirm:$false
+
+# Restore or move mail between Outlook folders
+.\Move-OutlookMailBetweenFolders.ps1 `
+    -SourceFolderPath 'me@gmail.com\[Gmail]\Trash' `
+    -TargetFolderPath 'me@gmail.com\Inbox' `
+    -SinceDate '2026-01-01' -WhatIf
 ```
 
 ---
@@ -82,8 +89,10 @@ A bare `-SourceFolderPath 'Inbox'` resolves against the **default** store, which
 
    Filtering server-side via `Items.Restrict` is far faster than iterating every item, and the ISO-style DASL date avoids the locale-dependent parsing that `[ReceivedTime]` jet queries suffer from. Only items whose `Class` is `olMail` (43) are kept, so meeting responses and delivery reports are left alone. Results are sorted **oldest first**, so a capped run takes the genuinely oldest mail.
 6. **Collect identifiers first** — the matching messages are captured as `EntryID` / `StoreID` pairs *before* any move happens. This is the single most important detail in the script: moving an item mutates the `Items` collection it came from, so walking that collection live causes Outlook to silently skip roughly every second message. Each item is re-fetched with `GetItemFromID` immediately before its move.
-7. **Move** — each message is moved to the target folder, with per-item progress and a warning (not a halt) on individual failures.
+7. **Move in batches** — `-MaxItems` bounds candidate collection as well as moves. The archive script aborts after 15 consecutive failures, which catches a dead Outlook COM server instead of producing thousands of RPC warnings.
 8. **Log** — every moved message is written to a timestamped CSV.
+
+The DASL date property is stored in UTC while Outlook displays `ReceivedTime` in local time. Year boundaries are converted from local midnight to UTC before filtering.
 
 ### Folder mirroring
 
@@ -157,6 +166,7 @@ Verify the results in Outlook before continuing.
 | `-TargetFolderName` | `Pre-2020` | Folder inside the PST that receives the mail. |
 | `-SourceFolderPath` | `Inbox` | Source path. **Store-qualify this** - see [Know your store layout](#know-your-store-layout-before-you-start). |
 | `-BeforeYear` | `2020` | Archives items received strictly before 1 January of this year. |
+| `-SinceYear` | unset | Optional lower bound, inclusive. Use with `-BeforeYear` to archive one year without sweeping older mail. |
 | `-IncludeSubfolders` | off | Recurse, mirroring the folder tree under the target. |
 | `-MaxItems` | unlimited | Cap on items **considered**, oldest first. Bounds the scan itself, so it also limits a `-WhatIf` run. |
 | `-LogPath` | timestamped CSV beside the script | Destination for the move log. |
@@ -176,9 +186,18 @@ me@gmail.com\Inbox\Receipts
 
 ## Archiving into the year PSTs
 
-`E:\PSTArchiveFiles` holds `Pre2020Mail.pst`, `2020Mail.pst`, `2021Mail.pst`, `2022Mail.pst` and `2023Mail.pst`.
+`E:\PSTArchiveFiles` holds the year PSTs, including `Pre2020Mail.pst`, `2020Mail.pst`, `2021Mail.pst`, `2022Mail.pst`, `2023Mail.pst` and `2025Mail.pst`.
 
-`-BeforeYear` is an **exclusive upper bound with no lower bound**, so each pass takes everything the previous pass left behind. Pass order is therefore load-bearing: oldest first. Running the 2023 pass first would sweep decades of mail into `2023Mail.pst`.
+`-BeforeYear` is an **exclusive upper bound**. Without `-SinceYear` it has no lower bound, so a pass can sweep every older year into the destination. Use both bounds when processing a specific year:
+
+```powershell
+.\Move-OutlookMailToArchive.ps1 `
+    -PstPath 'E:\PSTArchiveFiles\2025Mail.pst' -TargetFolderName '2025' `
+    -SourceFolderPath 'me@gmail.com\[Gmail]\Trash' `
+    -SinceYear 2025 -BeforeYear 2026 -Confirm:$false
+```
+
+For an open-ended oldest-first archive, `Invoke-YearlyArchive.ps1` still enforces pass order.
 
 [`Invoke-YearlyArchive.ps1`](Invoke-YearlyArchive.ps1) enforces the ordering so it cannot be got wrong by hand:
 
@@ -204,6 +223,28 @@ Its passes are:
 | 2023 | `2023Mail.pst` | 2024-01-01 |
 
 Use `-ThroughYear` to change the last year processed.
+
+### Restoring Gmail Trash into PST archives
+
+When Gmail Trash contains mail that should be retained, move it directly into the appropriate local PST rather than first restoring it to an IMAP folder. This avoids one server round-trip per item and preserves the year-based archive layout:
+
+```powershell
+# 2025 only
+.\Move-OutlookMailToArchive.ps1 -PstPath 'E:\PSTArchiveFiles\2025Mail.pst' `
+    -TargetFolderName '2025' -SourceFolderPath 'me@gmail.com\[Gmail]\Trash' `
+    -SinceYear 2025 -BeforeYear 2026 -MaxItems 2000 -Confirm:$false
+```
+
+Use repeated bounded runs for very large Trash folders. Outlook can become unstable under sustained COM load; each run commits individual moves, and the archive script stops after repeated RPC failures so a later run can resume safely.
+
+To keep current-year mail in Gmail, move it out of Trash to the Inbox or another Gmail folder instead of archiving it to a PST. The folder mover handles that operation:
+
+```powershell
+.\Move-OutlookMailBetweenFolders.ps1 `
+    -SourceFolderPath 'me@gmail.com\[Gmail]\Trash' `
+    -TargetFolderPath 'me@gmail.com\Inbox' `
+    -SinceDate '2026-01-01' -BatchSize 500 -Confirm:$false
+```
 
 ---
 
@@ -232,6 +273,14 @@ You are almost certainly pointing at the wrong store. See [Know your store layou
 ### A `-WhatIf` run takes a very long time
 
 Add `-MaxItems`. It bounds the scan itself, not just the moves, so the script stops reading COM properties once it has enough candidates.
+
+### Large Trash or IMAP moves are slow
+
+Moves between two Gmail/IMAP folders require a server round-trip per message. Moving from Gmail directly into a local PST is substantially faster. `Move-OutlookMailBetweenFolders.ps1` works in batches and can be resumed, but a large restore to an IMAP Inbox may still take hours.
+
+### The archive run aborts with RPC errors
+
+Outlook may have crashed or its COM server may have stopped responding. Keep the classic Outlook window visible, restart it, and rerun the same bounded command. Already completed moves remain completed. Check that `Get-Process OUTLOOK | Select-Object MainWindowTitle` shows a visible window rather than an empty title.
 
 ### Outlook "won't load" after running a script
 
@@ -344,7 +393,9 @@ These are the documented settings, but they are not a permanent guarantee - Micr
 
 ## Cautions
 
-**Gmail over IMAP.** Moving a message out of an IMAP folder into a local PST deletes it from Google's servers on the next sync. The PST becomes your only copy. Back up `E:\PSTArchiveFiles` before a full run.
+**Gmail over IMAP.** Moving a message out of an IMAP folder into a local PST removes it from that IMAP folder. Whether it remains in Gmail's All Mail depends on Gmail's IMAP expunge setting; verify the message in Gmail web before treating the PST as the only copy. Back up `E:\PSTArchiveFiles` before a full run.
+
+**Gmail Trash is temporary.** Gmail normally purges Trash after 30 days. If Trash contains mail you want to retain, move it to a Gmail folder or archive it to PST promptly.
 
 **Prefer `Inbox` over `[Gmail]\All Mail`.** `All Mail` contains every message in the account, including copies already filed elsewhere, so archiving it will download and move far more than intended.
 
@@ -360,7 +411,7 @@ These are the documented settings, but they are not a permanent guarantee - Micr
 
 ## Logs and privacy
 
-Each run writes `ArchiveLog-yyyyMMdd-HHmmss.csv` containing the subject, sender, received time and source folder of every moved message.
+Each run writes `ArchiveLog-yyyyMMdd-HHmmss.csv` or `RestoreLog-yyyyMMdd-HHmmss.csv` containing the subject, sender, received time and source folder of every moved message. Generated logs are kept in the `log` folder.
 
 These logs contain **personal mail metadata** and are excluded by [`.gitignore`](.gitignore), along with `*.pst`, `*.ost` and `*.msg`. Do not commit them. If you need to share one, strip the subject and sender columns first.
 
@@ -372,6 +423,8 @@ These logs contain **personal mail metadata** and are excluded by [`.gitignore`]
 | --- | --- |
 | `Test-OutlookAutomation.ps1` | Read-only pre-flight diagnostics |
 | `Move-OutlookMailToArchive.ps1` | The archiving script |
+| `Move-OutlookMailBetweenFolders.ps1` | Batched Outlook-folder mover and Trash restore helper |
 | `Invoke-YearlyArchive.ps1` | Ordered multi-year orchestration |
+| `log/` | Generated archive and restore logs; ignored by git |
 | `README.md` | This document |
 | `.gitignore` | Excludes archive logs, PST/OST/MSG files, editor noise |

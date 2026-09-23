@@ -28,6 +28,11 @@
 .PARAMETER BeforeYear
     Items received strictly before 1 January of this year are archived.
 
+.PARAMETER SinceYear
+    Optional lower bound. Only items received on or after 1 January of this year are
+    archived. Without it -BeforeYear is open-ended and will sweep up everything older,
+    which matters when the source still holds many years of mail.
+
 .PARAMETER IncludeSubfolders
     Also process subfolders of the source, recreating the folder tree under the target.
 
@@ -60,6 +65,8 @@ param(
     [string]$SourceFolderPath = 'Inbox',
     [ValidateRange(1990, 2100)]
     [int]$BeforeYear = 2020,
+    [ValidateRange(1990, 2100)]
+    [int]$SinceYear,
     [switch]$IncludeSubfolders,
     [ValidateRange(1, [int]::MaxValue)]
     [int]$MaxItems = [int]::MaxValue,
@@ -219,8 +226,14 @@ function Get-ArchiveCandidate {
         [int] $Limit = [int]::MaxValue
     )
 
-    $cutoff = '{0:0000}-01-01 00:00' -f $Year
-    $filter = '@SQL="urn:schemas:httpmail:datereceived" < ''{0}''' -f $cutoff
+    # datereceived is stored in UTC while ReceivedTime displays local time, so convert local
+    # midnight to UTC or year boundaries land a few hours out.
+    $cutoff = ([datetime]::new($Year, 1, 1, 0, 0, 0, [DateTimeKind]::Local)).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')
+    $clauses = @('"urn:schemas:httpmail:datereceived" < ''{0}''' -f $cutoff)
+    if ($script:SinceCutoff) {
+        $clauses += '"urn:schemas:httpmail:datereceived" >= ''{0}''' -f $script:SinceCutoff
+    }
+    $filter = '@SQL=' + ($clauses -join ' AND ')
 
     $items = $Folder.Items
     $items.Sort('[ReceivedTime]', $false)   # oldest first, so a capped run takes the oldest mail
@@ -290,10 +303,19 @@ function Invoke-FolderArchive {
             $item = $Namespace.GetItemFromID($candidate.EntryID, $candidate.StoreID)
             [void]$item.Move($TargetFolder)
             $MovedCount.Value++
+            $script:ConsecutiveFailures = 0
             $Log.Value.Add($candidate)
         }
         catch {
-            Write-Warning "Failed to move '$($candidate.Subject)': $($_.Exception.Message)"
+            $script:ConsecutiveFailures++
+            if ($script:ConsecutiveFailures -le 3) {
+                Write-Warning "Failed to move '$($candidate.Subject)': $($_.Exception.Message)"
+            }
+            if ($script:ConsecutiveFailures -ge 15) {
+                # A dead Outlook returns the same RPC error for every item; bail out rather than
+                # logging thousands of identical warnings and reporting a clean finish.
+                throw "Aborting: $($script:ConsecutiveFailures) consecutive failures. Outlook has most likely stopped responding - confirm it is running with a visible window, then re-run."
+            }
         }
     }
     Write-Progress -Activity "Archiving $($SourceFolder.Name)" -Completed
@@ -330,6 +352,9 @@ function Invoke-RecursiveArchive {
 
 # Captured so the helper functions share this script's -WhatIf / -Confirm state.
 $script:Cmdlet = $PSCmdlet
+$script:ConsecutiveFailures = 0
+# Resolved here: $PSBoundParameters inside a function refers to that function's own parameters.
+$script:SinceCutoff = if ($PSBoundParameters.ContainsKey('SinceYear')) { ([datetime]::new($SinceYear, 1, 1, 0, 0, 0, [DateTimeKind]::Local)).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') } else { $null }
 
 Assert-ClassicOutlook
 $ns = Get-OutlookNamespace
@@ -350,6 +375,7 @@ Write-Host ''
 Write-Host "Source      : $($source.FolderPath)"
 Write-Host "Destination : $($target.FolderPath)  ($PstPath)"
 Write-Host "Cut-off     : received before $BeforeYear-01-01"
+if ($script:SinceCutoff) { Write-Host "Lower bound : received on/after $SinceYear-01-01" }
 Write-Host "Subfolders  : $([bool]$IncludeSubfolders)"
 Write-Host ''
 
