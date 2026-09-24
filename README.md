@@ -10,6 +10,7 @@ These scripts drive the **classic** Outlook desktop client over COM to move mess
 | [`Move-OutlookMailToArchive.ps1`](Move-OutlookMailToArchive.ps1) | Does the archiving. One source folder, one target PST. |
 | [`Move-OutlookMailBetweenFolders.ps1`](Move-OutlookMailBetweenFolders.ps1) | Moves mail between Outlook folders, with optional date filtering and batches. |
 | [`Invoke-YearlyArchive.ps1`](Invoke-YearlyArchive.ps1) | Runs every year pass in the correct order. |
+| [`ARCHIVE-OPERATIONS.md`](ARCHIVE-OPERATIONS.md) | Repeatable runbook for future archive sessions and recovery. |
 
 ---
 
@@ -409,6 +410,24 @@ These are the documented settings, but they are not a permanent guarantee - Micr
 
 ---
 
+## Current archive status - 2026-09-24
+
+The cleanup passes completed for pre-2020 through 2025. Normal mail remaining in Gmail Trash is limited to the current unresolved/non-mail items; the last verified total was 22 items, including the unreadable `Recall: Property Manager` item and other Outlook item classes that the archive script intentionally skips.
+
+| PST | Approximate size |
+| --- | ---: |
+| `Pre2020Mail.pst` | 1,573.5 MB |
+| `2020Mail.pst` | 612.3 MB |
+| `2021Mail.pst` | 985.0 MB |
+| `2022Mail.pst` | 1,416.6 MB |
+| `2023Mail.pst` | 1,298.9 MB |
+| `2024Mail.pst` | 1,411.7 MB |
+| `2025Mail.pst` | 1,372.0 MB |
+
+Outlook was closed after the archive work. The PSTs were verified with exclusive read/write access and are ready to copy. See [`ARCHIVE-OPERATIONS.md`](ARCHIVE-OPERATIONS.md) before starting another session.
+
+---
+
 ## Logs and privacy
 
 Each run writes `ArchiveLog-yyyyMMdd-HHmmss.csv` or `RestoreLog-yyyyMMdd-HHmmss.csv` containing the subject, sender, received time and source folder of every moved message. Generated logs are kept in the `log` folder.
@@ -425,6 +444,7 @@ These logs contain **personal mail metadata** and are excluded by [`.gitignore`]
 | `Move-OutlookMailToArchive.ps1` | The archiving script |
 | `Move-OutlookMailBetweenFolders.ps1` | Batched Outlook-folder mover and Trash restore helper |
 | `Invoke-YearlyArchive.ps1` | Ordered multi-year orchestration |
+| `ARCHIVE-OPERATIONS.md` | Future-session runbook and recovery notes |
 | `log/` | Generated archive and restore logs; ignored by git |
 | `README.md` | This document |
 | `.gitignore` | Excludes archive logs, PST/OST/MSG files, editor noise |
