@@ -240,9 +240,10 @@ function Get-ArchiveCandidate {
     $restricted = $items.Restrict($filter)
 
     $storeId = $Folder.StoreID
+    $total = $restricted.Count
     $results = [System.Collections.Generic.List[object]]::new()
 
-    for ($i = 1; $i -le $restricted.Count; $i++) {
+    for ($i = 1; $i -le $total; $i++) {
         if ($results.Count -ge $Limit) { break }
         $item = $restricted.Item($i)
         if ($item.Class -ne $olMailItem) { continue }   # skip meeting responses, reports, etc.
@@ -254,7 +255,13 @@ function Get-ArchiveCandidate {
             SenderName   = $item.SenderName
             SourceFolder = $Folder.FolderPath
         })
+        if (($i % 100) -eq 0) {
+            Write-Progress -Id 1 -Activity "Scanning $($Folder.Name)" `
+                -Status "Collected $($results.Count) of up to $Limit candidates; inspected $i of $total" `
+                -PercentComplete (($i / [Math]::Max($total, 1)) * 100)
+        }
     }
+    Write-Progress -Id 1 -Activity "Scanning $($Folder.Name)" -Completed
     $results
 }
 
@@ -283,6 +290,8 @@ function Invoke-FolderArchive {
     Write-Host "  $($candidates.Count) item(s) selected (received before $Year)." -ForegroundColor Cyan
 
     $index = 0
+    $started = [Diagnostics.Stopwatch]::StartNew()
+    Write-Host "  Moving $($candidates.Count) item(s) in this batch..." -ForegroundColor Yellow
     foreach ($candidate in $candidates) {
         if ($Processed.Value -ge $MaxItems) {
             Write-Warning "Reached -MaxItems limit of $MaxItems. Stopping."
@@ -317,7 +326,13 @@ function Invoke-FolderArchive {
                 throw "Aborting: $($script:ConsecutiveFailures) consecutive failures. Outlook has most likely stopped responding - confirm it is running with a visible window, then re-run."
             }
         }
+        if (($index % 100) -eq 0 -or $index -eq $candidates.Count) {
+            $rate = if ($started.Elapsed.TotalSeconds -gt 0) { $MovedCount.Value / $started.Elapsed.TotalSeconds } else { 0 }
+            Write-Host ("  Progress: {0}/{1} processed, {2} moved, {3:N1} items/sec, elapsed {4:hh\:mm\:ss}" -f `
+                $index, $candidates.Count, $MovedCount.Value, $rate, $started.Elapsed) -ForegroundColor DarkCyan
+        }
     }
+    $started.Stop()
     Write-Progress -Activity "Archiving $($SourceFolder.Name)" -Completed
 }
 
