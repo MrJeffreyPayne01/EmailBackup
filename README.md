@@ -4,17 +4,22 @@ PowerShell automation for archiving Outlook mail into year-based PST files.
 
 These scripts drive the **classic** Outlook desktop client over COM to move messages older than a cut-off year out of a live mailbox and into a folder inside an archive PST.
 
+All scripts live in [`scripting/`](scripting).
+
 | Script | Purpose |
 | --- | --- |
-| [`Test-OutlookAutomation.ps1`](Test-OutlookAutomation.ps1) | Read-only pre-flight check. **Run this first.** |
-| [`Move-OutlookMailToArchive.ps1`](Move-OutlookMailToArchive.ps1) | Does the archiving. One source folder, one target PST. |
-| [`Move-OutlookMailBetweenFolders.ps1`](Move-OutlookMailBetweenFolders.ps1) | Moves mail between Outlook folders, with optional date filtering and batches. |
-| [`Invoke-YearlyArchive.ps1`](Invoke-YearlyArchive.ps1) | Runs every year pass in the correct order. |
+| [`Test-OutlookAutomation.ps1`](scripting/Test-OutlookAutomation.ps1) | Read-only pre-flight check. **Run this first.** |
+| [`Move-OutlookMailToArchive.ps1`](scripting/Move-OutlookMailToArchive.ps1) | Does the archiving. One source folder, one target PST. |
+| [`Move-OutlookMailBetweenFolders.ps1`](scripting/Move-OutlookMailBetweenFolders.ps1) | Moves mail between Outlook folders, with optional date filtering and batches. |
+| [`Invoke-YearlyArchive.ps1`](scripting/Invoke-YearlyArchive.ps1) | Runs every year pass in the correct order. |
+| [`Export-InboxSenderSummary.ps1`](scripting/Export-InboxSenderSummary.ps1) | Read-only. Counts mail per sender in a folder and exports a CSV, sorted by count, for spotting bulk/spam senders. |
 | [`ARCHIVE-OPERATIONS.md`](ARCHIVE-OPERATIONS.md) | Repeatable runbook for future archive sessions and recovery. |
 
 ---
 
 ## Quick start
+
+All commands below run from the `scripting` folder (`cd scripting`), or prefix paths with `scripting\`.
 
 ```powershell
 # 1. Pre-flight - checks everything, changes nothing
@@ -31,6 +36,9 @@ These scripts drive the **classic** Outlook desktop client over COM to move mess
     -SourceFolderPath 'me@gmail.com\[Gmail]\Trash' `
     -TargetFolderPath 'me@gmail.com\Inbox' `
     -SinceDate '2026-01-01' -WhatIf
+
+# Count Inbox mail per sender and export a CSV for spam/relevance triage
+.\Export-InboxSenderSummary.ps1 -SourceFolderPath 'me@gmail.com\Inbox'
 ```
 
 ---
@@ -200,7 +208,7 @@ me@gmail.com\Inbox\Receipts
 
 For an open-ended oldest-first archive, `Invoke-YearlyArchive.ps1` still enforces pass order.
 
-[`Invoke-YearlyArchive.ps1`](Invoke-YearlyArchive.ps1) enforces the ordering so it cannot be got wrong by hand:
+[`Invoke-YearlyArchive.ps1`](scripting/Invoke-YearlyArchive.ps1) enforces the ordering so it cannot be got wrong by hand:
 
 ```powershell
 # Print the plan without touching anything
@@ -246,6 +254,28 @@ To keep current-year mail in Gmail, move it out of Trash to the Inbox or another
     -TargetFolderPath 'me@gmail.com\Inbox' `
     -SinceDate '2026-01-01' -BatchSize 500 -Confirm:$false
 ```
+
+---
+
+## Finding spam and low-value senders - `Export-InboxSenderSummary.ps1`
+
+Read-only: it only reads item properties and moves or deletes nothing.
+
+```powershell
+.\Export-InboxSenderSummary.ps1 -SourceFolderPath 'me@gmail.com\Inbox'
+```
+
+It walks the folder, groups messages by sender email address, and writes a CSV (sorted by
+count, descending) with columns `SenderEmailAddress`, `SenderName`, `Count`,
+`FirstReceived` and `LastReceived`. Open the CSV in Excel to sort/filter further. Senders
+with a high count and an unfamiliar domain are the best candidates for an Outlook rule or
+block; a high count from a known contact is more likely a mailing list worth keeping.
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `-SourceFolderPath` | `Inbox` | Folder to scan. Store-qualify it the same way as the other scripts. |
+| `-IncludeSubfolders` | off | Also scan subfolders. |
+| `-OutputPath` | timestamped CSV in `log/` | Destination CSV file. |
 
 ---
 

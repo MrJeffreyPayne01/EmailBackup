@@ -29,6 +29,12 @@
 .PARAMETER BeforeDate
     Only move items received strictly before this date.
 
+.PARAMETER SenderAddress
+    Only move items whose sender email address contains one of these strings (substring
+    match, case-insensitive). Pass a full address for one mailbox or a bare domain (e.g.
+    'nextdoor.com') to catch every subdomain a sender uses. Multiple values are OR'd
+    together.
+
 .PARAMETER MaxItems
     Stop after considering this many items.
 
@@ -41,6 +47,10 @@
 .EXAMPLE
     .\Move-OutlookMailBetweenFolders.ps1 -SourceFolderPath 'me@gmail.com\[Gmail]\Trash' `
         -TargetFolderPath 'me@gmail.com\Inbox' -SinceDate '2024-01-01' -MaxItems 500 -WhatIf
+
+.EXAMPLE
+    .\Move-OutlookMailBetweenFolders.ps1 -SourceFolderPath 'me@gmail.com\Inbox' `
+        -TargetFolderPath 'me@gmail.com\[Gmail]\Trash' -SenderAddress 'nextdoor.com' -WhatIf
 #>
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -48,6 +58,7 @@ param(
     [Parameter(Mandatory)][string]$TargetFolderPath,
     [datetime]$SinceDate,
     [datetime]$BeforeDate,
+    [string[]]$SenderAddress,
     [ValidateRange(1, [int]::MaxValue)][int]$MaxItems = [int]::MaxValue,
     [ValidateRange(1, 5000)][int]$BatchSize = 500,
     [ValidateRange(1, 1000)][int]$MaxConsecutiveFailures = 15,
@@ -116,10 +127,16 @@ if ($PSBoundParameters.ContainsKey('SinceDate')) {
 if ($PSBoundParameters.ContainsKey('BeforeDate')) {
     $clauses += '"urn:schemas:httpmail:datereceived" < ''{0:yyyy-MM-dd HH:mm}''' -f $BeforeDate
 }
+if ($PSBoundParameters.ContainsKey('SenderAddress') -and $SenderAddress.Count -gt 0) {
+    $senderClauses = $SenderAddress | ForEach-Object {
+        '"urn:schemas:httpmail:fromemail" LIKE ''%{0}%''' -f $_.Replace("'", "''")
+    }
+    $clauses += '(' + ($senderClauses -join ' OR ') + ')'
+}
 $filter = if ($clauses.Count -gt 0) { '@SQL=' + ($clauses -join ' AND ') } else { $null }
 
-if (($PSBoundParameters.ContainsKey('SinceDate') -or $PSBoundParameters.ContainsKey('BeforeDate')) -and -not $filter) {
-    throw 'A date filter was requested but could not be built. Refusing to run unfiltered.'
+if (($PSBoundParameters.ContainsKey('SinceDate') -or $PSBoundParameters.ContainsKey('BeforeDate') -or $PSBoundParameters.ContainsKey('SenderAddress')) -and -not $filter) {
+    throw 'A filter was requested but could not be built. Refusing to run unfiltered.'
 }
 
 Write-Host ''

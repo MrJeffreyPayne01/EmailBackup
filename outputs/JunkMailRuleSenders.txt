@@ -1,0 +1,51 @@
+Senders to add to an Outlook rule (Move to Junk Email / mark as junk)
+Account: mrjeffreypayne01@gmail.com
+Suggested rule name: Auto-junk bulk senders
+Suggested action: Move to Junk Email
+
+Heavy on Broncos
+  newsletters@heavy.com
+
+Tommie Copper
+  TommieCopper@mail.tommiecopper.com
+
+1-800-Flowers
+  flowers@em.1800flowers.com
+  1800FLOWERS@em.1800flowers.com
+
+Nextdoor
+  reply@ss.email.nextdoor.com
+  no-reply@is.email.nextdoor.com
+  no-reply@rs.email.nextdoor.com
+  reply@rs.email.nextdoor.com
+  no-reply@ms.email.nextdoor.com
+  no-reply@hs.email.nextdoor.com
+  no-reply@ss.email.nextdoor.com
+
+Medium Daily Digest
+  noreply@medium.com
+
+The New York Times
+  nytdirect@nytimes.com
+
+Angi
+  angi@em.angi.com
+
+CruisesOnly
+  cruisesonly@email.cruisesonly.com
+
+Samsung
+  samsung@innovations.samsungusa.com
+
+How to set this up in classic Outlook:
+1. File > Manage Rules & Alerts > New Rule > "Apply rule on messages I receive" > Next.
+2. Check "from people or public group", click the underlined link, and add each address above.
+3. Next > check "move it to the specified folder" and pick "Junk Email" for this account.
+4. Finish. Do not run the rule now on existing messages - the matching Inbox mail has
+   already been moved to Trash separately.
+
+Note: attempting to create this rule via Outlook COM automation failed with
+"One or more rules cannot be saved because of invalid actions or conditions" for this
+IMAP account, even for a plain Subject condition moving to a normal folder - Outlook's
+rule engine appears to reject rules created this way for this store, so it must be set
+up by hand in the Rules Wizard UI.
