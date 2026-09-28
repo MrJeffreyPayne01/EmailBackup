@@ -1,6 +1,7 @@
 # Archive logs contain personal mail metadata (subjects, senders) - never commit.
 ArchiveLog-*.csv
 *.csv
+/log/
 
 # Transcripts from dry runs also capture subjects.
 *.log
